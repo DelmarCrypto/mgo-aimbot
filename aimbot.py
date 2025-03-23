@@ -4,36 +4,55 @@ from mss import mss
 import vgamepad as vg
 import keyboard
 import time
+import json
 
 # Initialisation
 sct = mss()
-gamepad = vg.VX360Gamepad()  # Manette virtuelle Xbox 360
+gamepad = vg.VX360Gamepad()
 
-# Charger les templates
+# Charger les captures d'écran
 try:
-    head_template = cv2.imread('head_template.png', 0)
-    if head_template is None:
-        raise FileNotFoundError("Fichier 'head_template.png' non trouvé.")
-    w_head, h_head = head_template.shape[::-1]
-
-    weapon_bullet_template = cv2.imread('m4_template.png', 0)
-    if weapon_bullet_template is None:
-        raise FileNotFoundError("Fichier 'm4_template.png' non trouvé.")
-    w_weapon, h_weapon = weapon_bullet_template.shape[::-1]
-
-    weapon_no_bullet_template = cv2.imread('mk2_template.png', 0)
-    if weapon_no_bullet_template is None:
-        raise FileNotFoundError("Fichier 'mk2_template.png' non trouvé.")
-    w_no_bullet, h_no_bullet = weapon_no_bullet_template.shape[::-1]
+    head_screenshot = cv2.imread('head_screenshot.png', 0)
+    if head_screenshot is None:
+        raise FileNotFoundError("Fichier 'head_screenshot.png' non trouvé.")
+    
+    m4_screenshot = cv2.imread('m4_screenshot.png', 0)
+    if m4_screenshot is None:
+        raise FileNotFoundError("Fichier 'm4_screenshot.png' non trouvé.")
+    
+    mk2_screenshot = cv2.imread('mk2_screenshot.png', 0)
+    if mk2_screenshot is None:
+        raise FileNotFoundError("Fichier 'mk2_screenshot.png' non trouvé.")
 except FileNotFoundError as e:
     print(e)
     exit()
+
+# Charger les ROI depuis le fichier JSON
+try:
+    with open('rois.json', 'r') as f:
+        rois = json.load(f)
+    head_roi = rois['head']
+    m4_roi = rois['m4']
+    mk2_roi = rois['mk2']
+except FileNotFoundError:
+    print("Erreur : Fichier 'rois.json' non trouvé. Veuillez exécuter 'select_rois.py' pour définir les ROI.")
+    exit()
+
+# Extraire les templates à partir des ROI
+head_template = head_screenshot[head_roi[1]:head_roi[1] + head_roi[3], head_roi[0]:head_roi[0] + head_roi[2]]
+w_head, h_head = head_template.shape[::-1]
+
+m4_template = m4_screenshot[m4_roi[1]:m4_roi[1] + m4_roi[3], m4_roi[0]:m4_roi[0] + m4_roi[2]]
+w_m4, h_m4 = m4_template.shape[::-1]
+
+mk2_template = mk2_screenshot[mk2_roi[1]:mk2_roi[1] + mk2_roi[3], mk2_roi[0]:mk2_roi[0] + mk2_roi[2]]
+w_mk2, h_mk2 = mk2_template.shape[::-1]
 
 # Régions de capture
 region = {'top': 100, 'left': 100, 'width': 800, 'height': 600}
 weapon_region = {'top': 500, 'left': 600, 'width': 200, 'height': 100}
 
-# Seuil de détection (abaissé à 0.5 pour plus de tolérance)
+# Seuil de détection
 DETECTION_THRESHOLD = 0.5
 
 # Centre de l’écran
@@ -101,8 +120,8 @@ def detect_weapon():
     weapon_screenshot = np.array(sct.grab(weapon_region))
     weapon_gray = cv2.cvtColor(weapon_screenshot, cv2.COLOR_BGRA2GRAY)
 
-    bullet_match = cv2.matchTemplate(weapon_gray, weapon_bullet_template, cv2.TM_CCOEFF_NORMED)
-    no_bullet_match = cv2.matchTemplate(weapon_gray, weapon_no_bullet_template, cv2.TM_CCOEFF_NORMED)
+    bullet_match = cv2.matchTemplate(weapon_gray, m4_template, cv2.TM_CCOEFF_NORMED)
+    no_bullet_match = cv2.matchTemplate(weapon_gray, mk2_template, cv2.TM_CCOEFF_NORMED)
 
     bullet_max = np.max(bullet_match)
     no_bullet_max = np.max(no_bullet_match)
