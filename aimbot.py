@@ -12,13 +12,9 @@ gamepad = vg.VX360Gamepad()
 
 # Charger les captures d'écran
 try:
-    head_screenshot = cv2.imread('head_screenshot.png', 0)
-    if head_screenshot is None:
-        raise FileNotFoundError("Fichier 'head_screenshot.png' non trouvé.")
-    
-    m4_screenshot = cv2.imread('m4_screenshot.png', 0)
-    if m4_screenshot is None:
-        raise FileNotFoundError("Fichier 'm4_screenshot.png' non trouvé.")
+    head_m4_screenshot = cv2.imread('head_m4_screenshot.png', 0)
+    if head_m4_screenshot is None:
+        raise FileNotFoundError("Fichier 'head_m4_screenshot.png' non trouvé.")
     
     mk2_screenshot = cv2.imread('mk2_screenshot.png', 0)
     if mk2_screenshot is None:
@@ -39,10 +35,10 @@ except FileNotFoundError:
     exit()
 
 # Extraire les templates à partir des ROI
-head_template = head_screenshot[head_roi[1]:head_roi[1] + head_roi[3], head_roi[0]:head_roi[0] + head_roi[2]]
+head_template = head_m4_screenshot[head_roi[1]:head_roi[1] + head_roi[3], head_roi[0]:head_roi[0] + head_roi[2]]
 w_head, h_head = head_template.shape[::-1]
 
-m4_template = m4_screenshot[m4_roi[1]:m4_roi[1] + m4_roi[3], m4_roi[0]:m4_roi[0] + m4_roi[2]]
+m4_template = head_m4_screenshot[m4_roi[1]:m4_roi[1] + m4_roi[3], m4_roi[0]:m4_roi[0] + m4_roi[2]]
 w_m4, h_m4 = m4_template.shape[::-1]
 
 mk2_template = mk2_screenshot[mk2_roi[1]:mk2_roi[1] + mk2_roi[3], mk2_roi[0]:mk2_roi[0] + mk2_roi[2]]
