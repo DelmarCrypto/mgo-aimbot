@@ -66,17 +66,17 @@ def select_roi(image_path, label):
 # Sélectionner les ROI pour chaque capture d'écran
 rois = {}
 
-# ROI pour la tête
-head_roi = select_roi('head_screenshot.png', 'tête')
+# ROI pour la tête (dans head_m4_screenshot.png)
+head_roi = select_roi('head_m4_screenshot.png', 'tête')
 if head_roi:
     rois['head'] = head_roi
 
-# ROI pour l'arme M4 Custom
-m4_roi = select_roi('m4_screenshot.png', 'M4 Custom')
+# ROI pour l'arme M4 Custom (dans head_m4_screenshot.png)
+m4_roi = select_roi('head_m4_screenshot.png', 'M4 Custom')
 if m4_roi:
     rois['m4'] = m4_roi
 
-# ROI pour la Pistola Mk. 2
+# ROI pour la Pistola Mk. 2 (dans mk2_screenshot.png)
 mk2_roi = select_roi('mk2_screenshot.png', 'Pistola Mk. 2')
 if mk2_roi:
     rois['mk2'] = mk2_roi
