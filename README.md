@@ -1,10 +1,10 @@
 # Aimbot pour Metal Gear Online 2 (MGO2)
 
-Ce projet est un aimbot pour *Metal Gear Online 2* (MGO2) fonctionnant sur PC via l'émulateur RPCS3. Il utilise `cv2.matchTemplate` pour détecter les têtes des adversaires et ajuster automatiquement la visée.
+Ce projet est un aimbot pour *Metal Gear Online 2* (MGO2) fonctionnant sur PC via l'émulateur RPCS3. Il utilise `cv2.matchTemplate` pour détecter les têtes des adversaires et ajuster automatiquement la visée, en utilisant des captures d'écran brutes.
 
 ## Fonctionnalités
-- Détection des têtes des adversaires avec `cv2.matchTemplate`.
-- Détection automatique des armes équipées (M4 Custom et Pistola Mk. 2).
+- Détection des têtes des adversaires avec `cv2.matchTemplate` à partir d'une capture d'écran.
+- Détection automatique des armes équipées (M4 Custom et Pistola Mk. 2) à partir de captures d'écran du HUD.
 - Fenêtre de débogage affichant les détections en temps réel.
 
 ## Prérequis
