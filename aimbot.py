@@ -2,28 +2,20 @@ import cv2
 import numpy as np
 from mss import mss
 import vgamepad as vg
+import keyboard
 import time
-from ultralytics import YOLO
-from flask import Flask, render_template
-from flask_socketio import SocketIO, emit
-import base64
-import threading
-import os
 
-# Initialisation de Flask et SocketIO
-app = Flask(__name__, template_folder='.')  # Indiquer que les templates sont à la racine
-app.config['SECRET_KEY'] = 'secret!'
-socketio = SocketIO(app)
-
-# Initialisation des composants de l'aimbot
+# Initialisation
 sct = mss()
-gamepad = vg.VX360Gamepad()
+gamepad = vg.VX360Gamepad()  # Manette virtuelle Xbox 360
 
-# Charger le modèle YOLO
-model = YOLO('best.pt')  # Assurez-vous que best.pt est dans le répertoire ou mettez à jour le chemin
-
-# Charger les templates pour les armes
+# Charger les templates
 try:
+    head_template = cv2.imread('head_template.png', 0)
+    if head_template is None:
+        raise FileNotFoundError("Fichier 'head_template.png' non trouvé.")
+    w_head, h_head = head_template.shape[::-1]
+
     weapon_bullet_template = cv2.imread('m4_template.png', 0)
     if weapon_bullet_template is None:
         raise FileNotFoundError("Fichier 'm4_template.png' non trouvé.")
@@ -37,50 +29,71 @@ except FileNotFoundError as e:
     print(e)
     exit()
 
-# Régions de capture (à calibrer manuellement ou via une interface)
+# Régions de capture
 region = {'top': 100, 'left': 100, 'width': 800, 'height': 600}
 weapon_region = {'top': 500, 'left': 600, 'width': 200, 'height': 100}
 
-# Seuil de détection pour les armes
-DETECTION_THRESHOLD = 0.7
+# Seuil de détection (abaissé à 0.5 pour plus de tolérance)
+DETECTION_THRESHOLD = 0.5
 
 # Centre de l’écran
 SCREEN_CENTER_X = region['left'] + region['width'] // 2
 SCREEN_CENTER_Y = region['top'] + region['height'] // 2
 
-# État de l’arme et de l'aimbot
+# État de l’arme
 using_bullet_weapon = True
-aimbot_running = False
-aimbot_thread = None
+
+# Fenêtre de débogage
+DEBUG_WINDOW = "Aimbot Debug"
+cv2.namedWindow(DEBUG_WINDOW, cv2.WINDOW_NORMAL)
 
 # Sensibilité
 SENSITIVITY = 0.6
 
-def detect_head(screenshot_rgb):
-    """Détecte les têtes avec YOLOv8 et retourne l'image annotée et la cible."""
-    results = model(screenshot_rgb)
+def detect_head():
+    """Détecte les têtes en utilisant cv2.matchTemplate."""
+    screenshot = np.array(sct.grab(region))
+    screenshot_rgb = cv2.cvtColor(screenshot, cv2.COLOR_BGRA2BGR)
+    screenshot_gray = cv2.cvtColor(screenshot, cv2.COLOR_BGRA2GRAY)
 
+    # Détection multi-échelle pour gérer les variations de taille
+    scales = [0.8, 1.0, 1.2]
     best_match = None
-    min_dist = float('inf')
-    for r in results:
-        boxes = r.boxes
-        for box in boxes:
-            if box.cls == 0:  # Classe 'head'
-                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                conf = box.conf.cpu().numpy()
-                if conf < 0.5:
-                    continue
-                tx = region['left'] + (x1 + x2) / 2
-                ty = region['top'] + (y1 + y2) / 2
-                dist = ((tx - SCREEN_CENTER_X) ** 2 + (ty - SCREEN_CENTER_Y) ** 2) ** 0.5
-                if dist < min_dist:
-                    min_dist = dist
-                    best_match = (tx, ty)
-                cv2.rectangle(screenshot_rgb, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-                cv2.putText(screenshot_rgb, f"Head: {conf:.2f}", (int(x1), int(y1) - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+    max_val = DETECTION_THRESHOLD
+    best_w, best_h = 0, 0
 
-    return screenshot_rgb, best_match, min_dist if best_match else None
+    for scale in scales:
+        scaled_template = cv2.resize(head_template, (0, 0), fx=scale, fy=scale)
+        scaled_w, scaled_h = scaled_template.shape[::-1]
+        if scaled_w > screenshot_gray.shape[1] or scaled_h > screenshot_gray.shape[0]:
+            continue
+        result = cv2.matchTemplate(screenshot_gray, scaled_template, cv2.TM_CCOEFF_NORMED)
+        loc = np.where(result >= DETECTION_THRESHOLD)
+        if loc[0].size > 0:
+            for y, x in zip(loc[0], loc[1]):
+                if result[y, x] > max_val:
+                    max_val = result[y, x]
+                    tx = region['left'] + x + scaled_w // 2
+                    ty = region['top'] + y + scaled_h // 2
+                    best_match = (tx, ty)
+                    best_w, best_h = scaled_w, scaled_h
+
+    # Afficher la détection
+    if best_match:
+        tx, ty = best_match
+        top_left = (tx - best_w // 2 - region['left'], ty - best_h // 2 - region['top'])
+        bottom_right = (top_left[0] + best_w, top_left[1] + best_h)
+        cv2.rectangle(screenshot_rgb, top_left, bottom_right, (0, 255, 0), 2)
+        cv2.putText(screenshot_rgb, f"Confidence: {max_val:.2f}", (top_left[0], top_left[1] - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+
+    cv2.imshow(DEBUG_WINDOW, screenshot_rgb)
+    cv2.waitKey(1)
+
+    if best_match:
+        dist = ((tx - SCREEN_CENTER_X) ** 2 + (ty - SCREEN_CENTER_Y) ** 2) ** 0.5
+        return best_match, dist
+    return None, None
 
 def detect_weapon():
     """Détecte l’arme équipée dans la zone HUD."""
@@ -97,13 +110,13 @@ def detect_weapon():
     if bullet_max >= DETECTION_THRESHOLD and bullet_max > no_bullet_max:
         if not using_bullet_weapon:
             using_bullet_weapon = True
-            socketio.emit('log', {'message': "Arme détectée : M4 (arme à balles)"})
+            print("Arme détectée : M4 (arme à balles)")
     elif no_bullet_max >= DETECTION_THRESHOLD and no_bullet_max > bullet_max:
         if using_bullet_weapon:
             using_bullet_weapon = False
-            socketio.emit('log', {'message': "Arme détectée : Mk. II (sans balles)"})
+            print("Arme détectée : Mk. II (sans balles)")
     else:
-        socketio.emit('log', {'message': f"Détection d’arme incertaine (M4: {bullet_max:.2f}, Mk. II: {no_bullet_max:.2f})"})
+        print(f"Détection d’arme incertaine (M4: {bullet_max:.2f}, Mk. II: {no_bullet_max:.2f})")
 
 def move_to_target(target, dist):
     """Ajuste le joystick droit pour viser la tête si une arme à balles est équipée."""
@@ -123,68 +136,106 @@ def move_to_target(target, dist):
         gamepad.right_joystick_float(0.0, 0.0)
         gamepad.update()
 
-def aimbot_loop():
-    """Boucle principale de l'aimbot."""
-    global aimbot_running
-    last_weapon_check = time.time()
-    while aimbot_running:
-        screenshot = np.array(sct.grab(region))
-        screenshot_rgb = cv2.cvtColor(screenshot, cv2.COLOR_BGRA2BGR)
-
-        # Détecter les têtes
-        annotated_image, target, dist = detect_head(screenshot_rgb)
-        if target:
-            socketio.emit('log', {'message': f"Tête détectée à {target}, distance: {dist:.2f}"})
-            move_to_target(target, dist)
-        else:
-            move_to_target(None, None)
-
-        # Convertir l'image annotée en base64 pour le streaming
-        _, buffer = cv2.imencode('.jpg', annotated_image)
-        jpg_as_text = base64.b64encode(buffer).decode('utf-8')
-        socketio.emit('video_frame', {'image': jpg_as_text})
-
-        # Détecter l'arme toutes les 0.5 secondes
-        current_time = time.time()
-        if current_time - last_weapon_check >= 0.5:
-            detect_weapon()
-            last_weapon_check = current_time
-
-        time.sleep(0.016)  # Environ 60 FPS
-
-    # Réinitialiser la manette à l'arrêt
-    gamepad.reset()
-    gamepad.update()
-
-# Routes Flask
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-# Événements WebSocket
-@socketio.on('start_aimbot')
-def start_aimbot():
-    global aimbot_running, aimbot_thread
-    if not aimbot_running:
-        aimbot_running = True
-        aimbot_thread = threading.Thread(target=aimbot_loop)
-        aimbot_thread.start()
-        emit('log', {'message': "Aimbot démarré."})
-
-@socketio.on('stop_aimbot')
-def stop_aimbot():
-    global aimbot_running
-    if aimbot_running:
-        aimbot_running = False
-        aimbot_thread.join()
-        emit('log', {'message': "Aimbot arrêté."})
-
-@socketio.on('toggle_weapon')
-def toggle_weapon():
+def toggle_weapon_state():
+    """Bascule manuelle avec 'T' si détection automatique échoue."""
     global using_bullet_weapon
-    using_bullet_weapon = not using_bullet_weapon
-    state = "activé (arme à balles)" if using_bullet_weapon else "désactivé (arme sans balles)"
-    emit('log', {'message': f"Aimbot {state}"})
+    if keyboard.is_pressed('t'):
+        using_bullet_weapon = not using_bullet_weapon
+        state = "activé (arme à balles)" if using_bullet_weapon else "désactivé (arme sans balles)"
+        print(f"Aimbot {state}")
+        time.sleep(0.2)
 
-if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=5000)
+def calibrate_regions():
+    """Permet à l’utilisateur de calibrer les régions de capture."""
+    print("Calibration des régions de capture...")
+    print("1. Placez la fenêtre de RPCS3 en mode fenêtré.")
+    print("2. Positionnez votre curseur sur le coin supérieur gauche de la zone de jeu, puis appuyez sur 'c'.")
+    while not keyboard.is_pressed('c'):
+        time.sleep(0.1)
+    game_region_pos1 = keyboard._mouse.get_position()
+    print(f"Coin supérieur gauche capturé : {game_region_pos1}")
+    time.sleep(0.5)
+
+    print("3. Positionnez votre curseur sur le coin inférieur droit de la zone de jeu, puis appuyez sur 'c'.")
+    while not keyboard.is_pressed('c'):
+        time.sleep(0.1)
+    game_region_pos2 = keyboard._mouse.get_position()
+    print(f"Coin inférieur droit capturé : {game_region_pos2}")
+    time.sleep(0.5)
+
+    print("4. Positionnez votre curseur sur le coin supérieur gauche de la zone HUD (icône d’arme), puis appuyez sur 'c'.")
+    while not keyboard.is_pressed('c'):
+        time.sleep(0.1)
+    weapon_region_pos1 = keyboard._mouse.get_position()
+    print(f"Coin supérieur gauche HUD capturé : {weapon_region_pos1}")
+    time.sleep(0.5)
+
+    print("5. Positionnez votre curseur sur le coin inférieur droit de la zone HUD, puis appuyez sur 'c'.")
+    while not keyboard.is_pressed('c'):
+        time.sleep(0.1)
+    weapon_region_pos2 = keyboard._mouse.get_position()
+    print(f"Coin inférieur droit HUD capturé : {weapon_region_pos2}")
+
+    region['top'] = game_region_pos1[1]
+    region['left'] = game_region_pos1[0]
+    region['width'] = game_region_pos2[0] - game_region_pos1[0]
+    region['height'] = game_region_pos2[1] - game_region_pos1[1]
+
+    weapon_region['top'] = weapon_region_pos1[1]
+    weapon_region['left'] = weapon_region_pos1[0]
+    weapon_region['width'] = weapon_region_pos2[0] - weapon_region_pos1[0]
+    weapon_region['height'] = weapon_region_pos2[1] - weapon_region_pos1[1]
+
+    global SCREEN_CENTER_X, SCREEN_CENTER_Y
+    SCREEN_CENTER_X = region['left'] + region['width'] // 2
+    SCREEN_CENTER_Y = region['top'] + region['height'] // 2
+
+    print("Calibration terminée.")
+    print(f"Région de jeu : {region}")
+    print(f"Région HUD : {weapon_region}")
+
+def main():
+    print("Aimbot pour MGO2 démarré.")
+    print("Appuyez sur 'T' pour basculer l’arme (arme à balles/sans balles).")
+    print("Appuyez sur 'Q' pour quitter.")
+    print("Assurez-vous que RPCS3 est en mode fenêtré.")
+
+    calibrate_regions()
+
+    last_weapon_check = time.time()
+    try:
+        while True:
+            if keyboard.is_pressed('q'):
+                print("Arrêt demandé par l’utilisateur.")
+                break
+
+            toggle_weapon_state()
+
+            current_time = time.time()
+            if current_time - last_weapon_check >= 0.5:
+                detect_weapon()
+                last_weapon_check = current_time
+
+            target, dist = detect_head()
+            if target:
+                print(f"Tête détectée à {target}, distance: {dist:.2f}")
+                move_to_target(target, dist)
+            else:
+                move_to_target(None, None)
+
+            time.sleep(0.016)
+
+    except KeyboardInterrupt:
+        print("Aimbot arrêté via Ctrl+C.")
+    finally:
+        gamepad.reset()
+        gamepad.update()
+        cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    try:
+        import keyboard
+    except ImportError:
+        print("Installez 'keyboard' avec 'pip install keyboard' (admin requis sur Windows).")
+        exit()
+    main()
